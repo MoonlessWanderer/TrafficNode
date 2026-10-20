@@ -73,6 +73,80 @@ def parse_meminfo(text: str) -> tuple[int, int, int]:
     return total, used, free
 
 
+VIRTUAL_PREFIXES = (
+    "docker",
+    "veth",
+    "br-",
+    "virbr",
+    "vnet",
+    "dummy",
+    "ifb",
+    "kube",
+    "flannel",
+    "cali",
+    "cni",
+    "lxc",
+    "podman",
+    "vboxnet",
+    "vmnet",
+    "azv",
+    "sit",
+    "gre",
+    "gretap",
+    "erspan",
+    "teql",
+    "ip6tnl",
+    "ip6_vti",
+    "ip_vti",
+)
+
+
+def is_virtual_interface(name: str) -> bool:
+    text = name.strip().lower()
+    if not text or text == "lo":
+        return True
+    return any(text.startswith(prefix) for prefix in VIRTUAL_PREFIXES)
+
+
+def choose_primary(interfaces: list[dict], route_text: str) -> str | None:
+    usable = [
+        item
+        for item in interfaces
+        if item.get("name") and not is_virtual_interface(item["name"]) and not any(char.isspace() for char in item["name"])
+    ]
+    if not usable:
+        return None
+    names = {item["name"] for item in usable}
+    routes: list[tuple[int, str]] = []
+    for line in route_text.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 7 or parts[1] != "00000000":
+            continue
+        try:
+            metric = int(parts[6])
+        except ValueError:
+            continue
+        routes.append((metric, parts[0]))
+    for _metric, name in sorted(routes):
+        if name in names:
+            return name
+    return max(usable, key=lambda item: item["rx_bytes"] + item["tx_bytes"])["name"]
+
+
+def main_interfaces(interfaces: list[dict], route_text: str) -> list[dict]:
+    primary = choose_primary(interfaces, route_text)
+    if primary is None:
+        return []
+    chosen = []
+    for item in interfaces:
+        if item["name"] != primary:
+            continue
+        copy = dict(item)
+        copy["primary"] = True
+        chosen.append(copy)
+    return chosen[:1]
+
+
 def parse_net_dev(text: str) -> list[dict]:
     rows = []
     for line in text.splitlines():
@@ -162,11 +236,11 @@ def collect(previous_cpu: tuple[int, int] | None) -> tuple[dict, tuple[int, int]
     os_release = Path("/etc/os-release")
     if os_release.is_file():
         os_name = parse_os_release(os_release.read_text(encoding="utf-8"))
-    interfaces = [
-        item
-        for item in parse_net_dev(Path("/proc/net/dev").read_text(encoding="utf-8"))
-        if item["name"] != "lo" and not any(char.isspace() for char in item["name"])
-    ][:64]
+    route_text = ""
+    route_path = Path("/proc/net/route")
+    if route_path.is_file():
+        route_text = route_path.read_text(encoding="utf-8")
+    interfaces = main_interfaces(parse_net_dev(Path("/proc/net/dev").read_text(encoding="utf-8")), route_text)
     sample = {
         "cpu_percent": round(cpu_percent(previous_cpu, current_cpu), 2),
         "ram_total_bytes": total,
@@ -253,7 +327,7 @@ def error_text(detail: str) -> str:
 def report_once(config: dict[str, str], previous_cpu: tuple[int, int] | None) -> tuple[int, int]:
     sample, current_cpu = collect(previous_cpu)
     if not sample["interfaces"]:
-        raise SystemExit("No network interface other than loopback was found.")
+        raise SystemExit("No main network interface was found.")
     body, nonce = build_body(sample)
     result = post_metrics(config, body, nonce)
     print(f"Report accepted. duplicate={str(bool(result.get('duplicate'))).lower()}", flush=True)

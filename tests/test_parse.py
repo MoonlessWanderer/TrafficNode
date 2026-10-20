@@ -1,6 +1,16 @@
 import re
 
-from node import build_body, cpu_fields, cpu_percent, load_config, parse_meminfo, parse_net_dev, parse_os_release
+from node import (
+    build_body,
+    choose_primary,
+    cpu_fields,
+    cpu_percent,
+    load_config,
+    main_interfaces,
+    parse_meminfo,
+    parse_net_dev,
+    parse_os_release,
+)
 
 
 def test_meminfo_uses_kibibytes():
@@ -26,6 +36,34 @@ def test_net_dev_reads_counters():
     assert eth["rx_dropped"] == 3
     assert eth["tx_errors"] == 5
     assert eth["tx_dropped"] == 6
+
+
+def test_main_interface_follows_the_default_route():
+    interfaces = [
+        {"name": "lo", "rx_bytes": 1, "tx_bytes": 1},
+        {"name": "docker0", "rx_bytes": 9000, "tx_bytes": 9000},
+        {"name": "veth123", "rx_bytes": 50, "tx_bytes": 50},
+        {"name": "eth0", "rx_bytes": 100, "tx_bytes": 40},
+        {"name": "eth1", "rx_bytes": 5, "tx_bytes": 5},
+    ]
+    route = (
+        "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n"
+        "docker0 00000000 00000000 0001 0 0 0 00000000 0 0 0\n"
+        "eth0 00000000 0100000A 0003 0 0 100 00000000 0 0 0\n"
+    )
+    assert choose_primary(interfaces, route) == "eth0"
+    chosen = main_interfaces(interfaces, route)
+    assert [item["name"] for item in chosen] == ["eth0"]
+    assert chosen[0]["primary"] is True
+
+
+def test_main_interface_uses_the_busiest_physical_nic_without_a_route():
+    interfaces = [
+        {"name": "eth0", "rx_bytes": 10, "tx_bytes": 10},
+        {"name": "eth1", "rx_bytes": 500, "tx_bytes": 20},
+        {"name": "veth1", "rx_bytes": 9999, "tx_bytes": 9999},
+    ]
+    assert choose_primary(interfaces, "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\n") == "eth1"
 
 
 def test_cpu_percent_is_busy_share():
