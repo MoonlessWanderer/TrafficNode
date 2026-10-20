@@ -12,7 +12,7 @@ Run that command again whenever you need the node. The menu is where you install
 
 Install asks for a directory after the packages. The default is `traffic-node` in the current directory, usually `/root/traffic-node`.
 
-Connect asks for the panel address, the node id, and the node key. Create the node in the panel first, then paste those values. The key stays in `node.env` on this server. Until the panel has a certificate, the address starts with `http://`, for example `http://203.0.113.10:443`.
+Connect asks for the panel address, the node id, and the node key. Create the node in the panel first. The panel shows a command that installs this node and connects it. The key stays in `node.env` on this server. Until the panel has a certificate, the address starts with `http://`, for example `http://203.0.113.10:443`.
 
 Update keeps that connection. Uninstall removes the service, the files, and the key.
 

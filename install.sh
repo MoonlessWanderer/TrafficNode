@@ -21,19 +21,23 @@ INTERVAL="30"
 VERIFY_TLS="1"
 INTERVAL_SET=0
 URL_SET=0
+QUICK_SETUP=0
 
 usage() {
   cat <<'EOF'
 Usage:
   install.sh                         Open the menu
-  install.sh install [--dir PATH]
+  install.sh install [--dir PATH] [--url ADDRESS --id TEXT --key TEXT]
   install.sh connect [options]
   install.sh update
   install.sh start|stop|restart|status|logs
   install.sh interval NUMBER
   install.sh uninstall [--yes]
 
-Options for connect:
+Passing --url, --id, and --key to install also connects the node.
+Install then asks no further questions.
+
+Options for install and connect:
   --url ADDRESS     Panel address, including http:// or https://.
   --id TEXT         Node id from the panel.
   --key TEXT        Node key from the panel.
@@ -136,7 +140,7 @@ choose_install_dir() {
   if [ -z "$APP_DIR" ]; then
     local default entered
     default="$(default_install_dir)"
-    if [ -r /dev/tty ]; then
+    if [ "$QUICK_SETUP" -eq 0 ] && [ -r /dev/tty ]; then
       entered="$(prompt "Install directory [${default}]: ")"
       APP_DIR="${entered:-$default}"
     else
@@ -468,7 +472,28 @@ require_connected() {
 }
 
 install_node() {
+  local saved_url="" saved_id="" saved_key="" saved_interval="" saved_tls=""
+  QUICK_SETUP=0
+  if [ -n "$PANEL_URL" ] && [ -n "$NODE_ID" ] && [ -n "$NODE_KEY" ]; then
+    QUICK_SETUP=1
+    URL_SET=1
+    INTERVAL_SET=1
+    saved_url="$PANEL_URL"
+    saved_id="$NODE_ID"
+    saved_key="$NODE_KEY"
+    saved_interval="$INTERVAL"
+    saved_tls="$VERIFY_TLS"
+  fi
   if installed; then
+    if [ "$QUICK_SETUP" -eq 1 ]; then
+      PANEL_URL="$saved_url"
+      NODE_ID="$saved_id"
+      NODE_KEY="$saved_key"
+      INTERVAL="$saved_interval"
+      VERIFY_TLS="$saved_tls"
+      connect_node
+      return
+    fi
     die "The node is already installed. Choose Update."
   fi
   echo "Installing system packages."
@@ -488,11 +513,23 @@ install_node() {
   chmod 0750 "$APP_DIR"
   chmod 0755 "$APP_DIR/install.sh"
   ensure_app_access
-  PANEL_URL=""
-  INTERVAL="30"
-  VERIFY_TLS="1"
+  if [ "$QUICK_SETUP" -eq 1 ]; then
+    PANEL_URL="$saved_url"
+    NODE_ID="$saved_id"
+    NODE_KEY="$saved_key"
+    INTERVAL="$saved_interval"
+    VERIFY_TLS="$saved_tls"
+  else
+    PANEL_URL=""
+    INTERVAL="30"
+    VERIFY_TLS="1"
+  fi
   write_state
   write_service
+  if [ "$QUICK_SETUP" -eq 1 ]; then
+    connect_node
+    return
+  fi
   echo
   echo "Installed in ${APP_DIR}"
   echo "Choose Connect to panel, then paste the node id and key from the panel."
