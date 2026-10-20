@@ -114,6 +114,9 @@ def cpu_fields(text: str) -> tuple[int, int]:
         parts = line.split()
         if parts and parts[0] == "cpu":
             numbers = [int(item) for item in parts[1:]]
+            # guest and guest_nice are already counted inside user and nice.
+            if len(numbers) > 8:
+                numbers = numbers[:8]
             idle = numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
             return sum(numbers), idle
     raise ValueError("cpu line missing")

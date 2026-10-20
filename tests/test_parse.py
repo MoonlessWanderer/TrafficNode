@@ -1,6 +1,6 @@
 import re
 
-from node import build_body, cpu_percent, load_config, parse_meminfo, parse_net_dev, parse_os_release
+from node import build_body, cpu_fields, cpu_percent, load_config, parse_meminfo, parse_net_dev, parse_os_release
 
 
 def test_meminfo_uses_kibibytes():
@@ -30,6 +30,13 @@ def test_net_dev_reads_counters():
 
 def test_cpu_percent_is_busy_share():
     assert cpu_percent((100, 50), (200, 100)) == 50.0
+
+
+def test_cpu_fields_do_not_count_guest_time_twice():
+    text = "cpu 100 0 0 100 0 0 0 0 40 10\n"
+    total, idle = cpu_fields(text)
+    assert total == 200
+    assert idle == 100
 
 
 def test_os_release_prefers_pretty_name():
