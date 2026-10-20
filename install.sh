@@ -298,7 +298,7 @@ ensure_app_access() {
   dir="$(dirname "$APP_DIR")"
   while [ "$dir" != "/" ]; do
     if ! runuser -u "$APP_USER" -- test -x "$dir"; then
-      chmod o+x "$dir"
+      chmod o+x "$dir" || return 1
     fi
     dir="$(dirname "$dir")"
   done
@@ -604,15 +604,36 @@ update_node() {
   require_ready
   load_state
   ensure_python
-  local stage
+  ensure_user
+  local stage was_active saved_env
   stage="$(mktemp -d)"
   echo "Downloading the update."
   if ! fetch_source "$stage"; then
     rm -rf "$stage"
     die "Could not download the update."
   fi
-  cp -a "$stage"/. "$APP_DIR"/
+  was_active=0
+  if systemctl is-active --quiet "$SERVICE"; then
+    was_active=1
+  fi
+  saved_env=""
+  if [ -f "${APP_DIR}/node.env" ]; then
+    saved_env="$(mktemp)"
+    cp -a "${APP_DIR}/node.env" "$saved_env"
+  fi
+  if ! cp -a "$stage"/. "$APP_DIR"/; then
+    if [ -n "$saved_env" ]; then
+      cp -a "$saved_env" "${APP_DIR}/node.env" || true
+      rm -f "$saved_env"
+    fi
+    rm -rf "$stage"
+    die "Could not copy the update. The connection file was kept."
+  fi
   rm -rf "$stage"
+  if [ -n "$saved_env" ]; then
+    cp -a "$saved_env" "${APP_DIR}/node.env"
+    rm -f "$saved_env"
+  fi
   chown -R "$APP_USER:$APP_GROUP" "$APP_DIR"
   chmod 0750 "$APP_DIR"
   chmod 0755 "$APP_DIR/install.sh"
@@ -621,8 +642,9 @@ update_node() {
   fi
   ensure_app_access
   write_service
-  if [ -f "$APP_DIR/node.env" ] && systemctl is-active --quiet "$SERVICE"; then
-    systemctl restart "$SERVICE"
+  if [ "$was_active" -eq 1 ]; then
+    systemctl reset-failed "$SERVICE" || true
+    systemctl restart "$SERVICE" || die "The update is in place, but the node service did not start."
   fi
   echo "Updated. The connection was kept."
 }
